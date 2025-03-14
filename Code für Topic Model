@@ -1,0 +1,82 @@
+install.packages(c("tm", "topicmodels", "SnowballC",
+                   "LDAvis", "servr", "ldatuning"))
+library(tm)
+library(topicmodels)
+library(SnowballC)
+library(LDAvis)
+library(servr)
+library(ldatuning)
+library(udpipe)
+
+txt_path <- #Txt-File einfügen
+text <- readLines(txt_path, encoding = "UTF-8")
+
+paragraphs <- unlist(strsplit(paste(text, collapse = "\n"), "\n{2,}"))
+
+corpus <- VCorpus(VectorSource(paragraphs))
+
+language <- "german"
+custom_stopwords <- c("der", "die", "das", "und", "in", "zu", "von", "mit", "auf", "für",
+                      "ist", "als", "ein", "eine", "sich", "dass", "nicht", "es", "an",
+                      "bei", "durch", "werden", "aber", "oder", "haben", "wir", "ihr",
+                      "er", "sie", "aus", "am", "des", "so", "was", "wie", "noch",
+                      "nach", "über", "vor", "unter", "sein", "können", "müssen", "dürfen",
+                      "wollen", "sollen", "machen", "tun", "lassen", "sagen", "gehen", "kommen",
+                      "bei", "aus", "durch", "für", "gegen", "ohne", "über", "unter", "auf",
+                      "nach", "vor", "neben", "mit", "zu", "als", "wie", "weil", "dass",
+                      "obwohl", "während", "so", "sehr", "immer", "wirklich", "gut", "schlecht",
+                      "viel", "wenig", "lang", "kurz", "alt", "neu", "richtig", "falsch", "wirklich", "sei"," sein", "sagte", "sagt", "sagen", "sehen")
+
+model <- udpipe_download_model("german")
+ud_model <- udpipe_load_model(model$file_model)
+lemmatize_text <- function(text) {
+  annotated <- udpipe_annotate(ud_model, x = text)
+  annotated <- as.data.frame(annotated)
+  paste(annotated$lemma, collapse = " ")
+}
+
+corpus <- tm_map(corpus, content_transformer(tolower))
+corpus <- tm_map(corpus, removePunctuation)
+corpus <- tm_map(corpus, removeNumbers)
+corpus <- tm_map(corpus, removeWords, stopwords(language))
+corpus <- tm_map(corpus, stemDocument, language = language)
+corpus <- tm_map(corpus, removeWords, custom_stopwords)
+corpus <- tm_map(corpus, content_transformer(lemmatize_text))
+corpus <- tm_map(corpus, stripWhitespace)
+
+
+
+
+dtm <- DocumentTermMatrix(corpus)
+row_sums <- rowSums(as.matrix(dtm))
+dtm <- dtm [row_sums > 0, ]
+row_sums <- row_sums[row_sums > 0]
+
+result <- FindTopicsNumber(
+  dtm,
+  topics = seq(from = 2,to = 15, by = 1),
+  metrics = c("Griffiths2004", "CaoJuan2009", "Arun2010", "Deveaud2014"),
+  method = "Gibbs",
+  control = list(seed = 1234),
+  mc.cores = 2L
+)
+
+FindTopicsNumber_plot(result)
+
+num <- #Nummer eingeben
+
+
+lda_model <- LDA(dtm, k = num, control = list(seed = 1234))
+print(terms(lda_model, 30))
+
+topics_per_document <- topics(lda_model)
+
+json_lda <- createJSON(
+  phi = posterior(lda_model)$terms,
+  theta = posterior(lda_model)$topics,
+  doc.length = row_sums,
+  vocab = colnames(dtm),
+  term.frequency = colSums(as.matrix(dtm))
+)
+
+serVis(json_lda)
